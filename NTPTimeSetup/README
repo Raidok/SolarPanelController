@@ -1,0 +1,7 @@
+This sketch is based on the Arduino Ethernet library UdpNtpClient example and is modified a bit. It includes daylight saving time adjustment for Estonia and possibly other nearby countries. Feel free to modify it to your needs.
+
+Requirements for this sketch:
+Arduino IDE 1.0
+Arduino itself
+Arduino Ethernet shield (WIZnet W5100 chip)
+Arduino Time library
