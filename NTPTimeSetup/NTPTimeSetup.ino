@@ -3,7 +3,7 @@
  Modified by Raidok to work in Estonia
  
  Timezone information: http://home-4.tiscali.nl/~t876506/TZworld.html
-*/
+ */
 
 #include <SPI.h>         
 #include <Ethernet.h>
@@ -35,11 +35,11 @@ void setup() {
   }
   Udp.begin(localPort);
   Serial.println("Started!");
-  
+
   // send an NTP packet to a time server
   sendNTPpacket(timeServer); 
   Serial.println("NTP packet sent!");
-  
+
   // wait and then see if a reply is available
   do {
     delay(1000);
@@ -47,9 +47,7 @@ void setup() {
 }
 
 void loop() {
-  if(timeStatus()!= timeNotSet) {
-    digitalClockDisplay();  
-  }
+  digitalClockDisplay();
   delay(1000);
 }
 
@@ -109,7 +107,7 @@ boolean parseNTPPacket() {
   if ( Udp.parsePacket() ) {
     Serial.println("Parsing packet.");
     // read the received packet into the buffer
-    Udp.read(packetBuffer,NTP_PACKET_SIZE);
+    Udp.read(packetBuffer, NTP_PACKET_SIZE);
     //the timestamp starts at byte 40 of the received packet and is four bytes,
     // or two words, long. First, extract the two words:
     unsigned long highWord = word(packetBuffer[40], packetBuffer[41]);
@@ -143,22 +141,21 @@ boolean parseNTPPacket() {
 // source http://www.arduino.cc/cgi-bin/yabb2/YaBB.pl?num=1291637975/10#10
 int adjustDstEurope() {
   // last sunday of march
-  int beginDSTDate = (31 - (5* year() /4 + 4) % 7);
-  Serial.println(beginDSTDate);
+  int beginDSTDate = (31 - (5 * year() / 4 + 4) % 7);
   int beginDSTMonth = 3;
   //last sunday of october
-  int endDSTDate = (31 - (5 * year() /4 + 1) % 7);
-  Serial.println(endDSTDate);
+  int endDSTDate = (31 - (5 * year() / 4 + 1) % 7);
   int endDSTMonth = 10;
   // DST is valid as:
   if (((month() > beginDSTMonth) && (month() < endDSTMonth))
-      || ((month() == beginDSTMonth) && (day() >= beginDSTDate))
-      || ((month() == endDSTMonth) && (day() <= endDSTDate))) {
-    return 10800;  // DST europe = utc +3 hour
+    || ((month() == beginDSTMonth) && (day() >= beginDSTDate))
+    || ((month() == endDSTMonth) && (day() <= endDSTDate))) {
+    return 10800;  // summertime = utc +3 hour
   } else {
-    return 7200; // nonDST europe = utc +2 hour
+    return 7200; // wintertime = utc +2 hour
   }
 }
+
 
 
 

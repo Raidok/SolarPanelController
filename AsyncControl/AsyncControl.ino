@@ -10,7 +10,7 @@
 #include "WebServer.h"
 
 // set these as necessary
-byte mac[] = { 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 };
+byte mac[] = { 0x90, 0xA2, 0xDA, 0x00, 0xF8, 0x03 };
 IPAddress ip(192, 168, 1, 2);
 
 // all pages located at the root and on port 80
