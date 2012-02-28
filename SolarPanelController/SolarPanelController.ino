@@ -4,7 +4,14 @@
  */
 
 
-// SEADISTA NEID
+#include <SPI.h>
+#include <Ethernet.h>
+#include <EthernetUdp.h>
+#include <WebServer.h>
+#include <Time.h>
+
+
+// NEID VÕIB VABALT MUUTA
 byte ip[4] = { 192, 168, 1, 2 };
 byte mac[6] = { 0x90, 0xA2, 0xDA, 0x01, 0x02, 0x03 };
 byte start[2] = { 6, 30 };
@@ -20,8 +27,8 @@ boolean right = false;
 boolean leftEdge = false;
 boolean rightEdge = false;
 boolean isRunning = false;
-long endTime = 0;
-long nextRun = 0;
+long endTime;
+long nextRun;
 
 #define END1 4
 #define END2 5
@@ -29,11 +36,6 @@ long nextRun = 0;
 #define PIN2 8
 #define NTP_PACKET_SIZE 48
 
-#include <SPI.h>
-#include <Ethernet.h>
-#include <EthernetUdp.h>
-#include <WebServer.h>
-#include <Time.h>
 WebServer webserver("", 80);
 IPAddress timeServer(193, 40, 5, 113);
 byte packetBuffer[NTP_PACKET_SIZE];
@@ -46,7 +48,7 @@ P(header) = "<!DOCTYPE html><html><head><title>Solar</title>"
   "<script language=\"javascript\">"
   "$(document).ready(function() {"
     "$('input[type=button]').click(function(src) {"
-      "$(\"DIV#status\").fadeOut();"
+      "$(\"DIV#status\").hide();"
       "var data = {}; data[src.target.name] = \"true\";"
       "$.post(\"ajax\", data, function(data) { $(\"DIV#status\").html(data).fadeIn().delay(1000).fadeOut(); });"
     "});"
@@ -57,12 +59,20 @@ P(colon) = ": ";
 P(button) = "<input type=\"button\" name=\"";
 P(value) = "\" value=\"";
 P(close) = "\"/>";
-P(statusDiv) = "<div id=\"status\" style=\"display:inline\"/>";
+P(statusDiv) = "<div id=\"status\" style=\"display:inline\"></div>";
 P(br) = "<br>";
-P(controlPage) = "<br/><a href=\"control\">Juhtimine</a><br/>";
-P(frontPage) = "<br/><a href=\"/\"></a><br/>";
-
-
+P(controlPage) = "<br/><a href=\"control\">Juhtimine</a>";
+P(frontPage) = "<br/><a href=\"index\">Avalehele</a>";
+P(settingsPage) = "<br/><a href=\"settings\">Seadistused</a>";
+P(logoutBegin) = "<br/><br/><a href=\"http://logout@";
+P(logoutEnd) = "\">Logi välja</a><br/>";
+P(dot) = ".";
+P(tdS) = "<td>";
+P(tdC) = "</td>";
+P(textInput_name) = "<input type=\"text\" name=\"";
+P(textInput_value) = "\" size=\"2\" value=\"";
+P(textInput_close) = "\"/>";
+P(saved) = "Salvestatud!";
 
 void defaultCmd(WebServer &server, WebServer::ConnectionType type, char *, bool) {
   server.httpSuccess();
@@ -78,17 +88,19 @@ void defaultCmd(WebServer &server, WebServer::ConnectionType type, char *, bool)
     }
     server.printP(br);
     server.printP(controlPage);
+    server.printP(settingsPage);
     server.printP(footer);
   }
 }
 
 
 void controlCmd(WebServer &server, WebServer::ConnectionType type, char *, bool) {
-  //if (server.checkCredentials("a29udDpyb2xsZXI=")) {
+  if (server.checkCredentials("a29udDpyb2xsZXI=")) {
     server.httpSuccess();
     if (type != WebServer::HEAD) {
       server.printP(header);
       server.print(getTimeString());
+      server.printP(br);
       server.printP(br);
       
       server.printP(button);
@@ -107,15 +119,144 @@ void controlCmd(WebServer &server, WebServer::ConnectionType type, char *, bool)
       
       server.printP(br);
       server.printP(frontPage);
+      server.printP(settingsPage);
+      
+      // logout link
+      server.printP(logoutBegin);
+      server.print(ip[0]);
+      server.printP(dot);
+      server.print(ip[1]);
+      server.printP(dot);
+      server.print(ip[2]);
+      server.printP(dot);
+      server.print(ip[3]);
+      server.printP(logoutEnd);
       server.printP(footer);
-    } else {
-      P(wrongPass) = "Vale parool!";
-      server.printP(wrongPass);
     }
-  //}
+  } else {
+    server.httpUnauthorized();
+  }
 }
 
+void settingsCmd(WebServer &server, WebServer::ConnectionType type, char *, bool) {
+  if (server.checkCredentials("a29udDpyb2xsZXI=")) {
+    server.httpSuccess();
+    if (type == WebServer::POST) {
+      char name[5], value[5];
+      int name_len, value_len;
+      int d, m, y, H, M, S;
+      while (server.readPOSTparam(name, 5, value, 5)) {
+        switch(*name) {
+          case 'd':
+            d = ((String)value).toInt();
+            break;
+          case 'm':
+            m = ((String)value).toInt();
+            break;
+          case 'y':
+            y = ((String)value).toInt();
+            break;
+          case 'H':
+            H = ((String)value).toInt();
+            break;
+          case 'M':
+            M = ((String)value).toInt();
+            break;
+          case 'S':
+            S = ((String)value).toInt();
+            break;
+          default:
+            server.print("unknown ");
+            server.print(name);
+            server.print(":");
+            server.println(value);
+        }
+      }
+      if (y) {
+        setTime(H,M,S,d,m,y);
+        server.print(getTimeString());
+        server.printP(br);
+        server.printP(saved);
+      }
 
+    } else {
+      
+      P(form_start) = "<form method=\"post\">"
+      "<table><tr><td>Päev</td><td>Kuu</td><td>Aasta</td><td>&nbsp;</td><td>Tunnid</td><td>Minutid</td><td>Sekundid</td></tr><tr><td>";
+      P(form_end) = "</td></tr></table><input type=\"submit\" value=\"Save\"/></form>";
+      P(separator) = "\"/></td><td>";
+      
+      time_t t = now(); 
+      
+      server.printP(form_start);
+      
+      // day
+      server.printP(textInput_name);
+      server.print("d");
+      server.printP(textInput_value);
+      server.print(day(t));
+      server.printP(separator);
+      
+      // month
+      server.printP(textInput_name);
+      server.print("m");
+      server.printP(textInput_value);
+      server.print(month(t));
+      server.printP(separator);
+      
+      // year
+      server.printP(textInput_name);
+      server.print("y");
+      server.printP(textInput_value);
+      server.print(year(t));
+      server.printP(separator);
+      
+      server.printP(tdC);
+      server.printP(tdS);
+      
+      // hour
+      server.printP(textInput_name);
+      server.print("H");
+      server.printP(textInput_value);
+      server.print(hour(t));
+      server.printP(separator);
+      
+      // minute
+      server.printP(textInput_name);
+      server.print("M");
+      server.printP(textInput_value);
+      server.print(minute(t));
+      server.printP(separator);
+      
+      // second
+      server.printP(textInput_name);
+      server.print("S");
+      server.printP(textInput_value);
+      server.print(second(t));
+      server.printP(separator);
+      
+      server.printP(form_end);
+    }
+    server.printP(br);
+    server.printP(frontPage);
+    server.printP(controlPage);
+    
+    // logout link
+    server.printP(logoutBegin);
+    server.print(ip[0]);
+    server.printP(dot);
+    server.print(ip[1]);
+    server.printP(dot);
+    server.print(ip[2]);
+    server.printP(dot);
+    server.print(ip[3]);
+    server.printP(logoutEnd);
+    server.printP(footer);
+  } else {
+    server.httpUnauthorized();
+  }
+    
+}
 
 void ajaxCmd(WebServer &server, WebServer::ConnectionType type, char *, bool) {
   server.httpSuccess();
@@ -138,8 +279,6 @@ void ajaxCmd(WebServer &server, WebServer::ConnectionType type, char *, bool) {
 }
 
 
-
-
 void setup() {
   // begin serial debugging
   Serial.begin(9600);
@@ -158,21 +297,22 @@ void setup() {
   webserver.setDefaultCommand(&defaultCmd);
   webserver.addCommand("index", &defaultCmd);
   webserver.addCommand("control", &controlCmd);
+  webserver.addCommand("settings", &settingsCmd);
   webserver.addCommand("ajax", &ajaxCmd);
   webserver.begin();
   
-  
-  // set time
-  setTime(3, 3, 00, 1, 1, 11);
+  // setting time
   Udp.begin(8888);
-  //sendNTPpacket(timeServer); 
   Serial.println("Ajapäring.");
-  /*do {
+  sendNTPpacket(timeServer); 
+  do {
     delay(1000);
-  } while (!parseNTPPacket());*/
+  } while (!parseNTPPacket());
   
-  // set timer
-  nextRun = millis() + 1000;
+  // set a little delay
+  endTime = millis() + 1000;
+  nextRun = endTime;
+  Serial.println("Läks käima!");
 }
 
 
@@ -293,32 +433,28 @@ String getDigits(int digits) {
   return returned;
 }
 
-
-unsigned long sendNTPpacket(IPAddress& address)
-{
+// send an NTP request to the time server at the given address 
+unsigned long sendNTPpacket(IPAddress &address) {
   // set all bytes in the buffer to 0
-  memset(packetBuffer, 0, NTP_PACKET_SIZE); 
+  memset(packetBuffer, 0, NTP_PACKET_SIZE);
   // Initialize values needed to form NTP request
   // (see URL above for details on the packets)
-  packetBuffer[0] = 0b11100011;   // LI, Version, Mode
-  packetBuffer[1] = 0;     // Stratum, or type of clock
-  packetBuffer[2] = 6;     // Polling Interval
-  packetBuffer[3] = 0xEC;  // Peer Clock Precision
+  packetBuffer[0] = 0b11100011; // LI, Version, Mode
+  packetBuffer[1] = 0; // Stratum, or type of clock
+  packetBuffer[2] = 6; // Polling Interval
+  packetBuffer[3] = 0xEC; // Peer Clock Precision
   // 8 bytes of zero for Root Delay & Root Dispersion
-  packetBuffer[12]  = 49; 
-  packetBuffer[13]  = 0x4E;
-  packetBuffer[14]  = 49;
-  packetBuffer[15]  = 52;
+  packetBuffer[12] = 49; 
+  packetBuffer[13] = 0x4E;
+  packetBuffer[14] = 49;
+  packetBuffer[15] = 52;
 
   // all NTP fields have been given values, now
-  // you can send a packet requesting a timestamp: 		   
+  // you can send a packet requesting a timestamp:
   Udp.beginPacket(address, 123); //NTP requests are to port 123
   Udp.write(packetBuffer,NTP_PACKET_SIZE);
-  Udp.endPacket(); 
+  Udp.endPacket();
 }
-/*
-
-
 
 boolean parseNTPPacket() {
   Serial.println("Checking for incoming packets.");
@@ -374,4 +510,3 @@ int adjustDstEurope() {
     return 7200; // wintertime = utc +2 hour
   }
 }
-*/
