@@ -12,13 +12,13 @@
 
 
 // NEID VÕIB VABALT MUUTA
-byte ip[4] = { 192, 168, 1, 2 };
-byte mac[6] = { 0x90, 0xA2, 0xDA, 0x01, 0x02, 0x03 };
+//byte ip[4] = { 88, 196, 226, 251 };
+byte mac[6] = { 0x90, 0xA2, 0xDA, 0x00, 0xF8, 0x03 };
 byte start[2] = { 6, 30 };
-byte stop[2] = { 23, 30 };
-byte rewind[2] = { 3, 3 };
+byte stop[2] = { 18, 30 };
+byte rewind[2] = { 3, 30 };
 long interval = 15000;
-long ms = 5000;
+long ms = 1000;
 
 
 // SIIT EDASI EI TASU VÄGA PUUTUDA
@@ -26,15 +26,23 @@ boolean left = false;
 boolean right = false;
 boolean leftEdge = false;
 boolean rightEdge = false;
+boolean leftBtn = false;
+boolean rightBtn = false;
 boolean isRunning = false;
+byte tests = 0;
+byte steps = 6;
+byte iteration = 0;
 long endTime;
 long nextRun;
 
+#define BTN1 2
+#define BTN2 3
 #define END1 4
 #define END2 5
 #define PIN1 7
 #define PIN2 8
 #define NTP_PACKET_SIZE 48
+#define MAX_TIME 21000
 
 WebServer webserver("", 80);
 IPAddress timeServer(193, 40, 5, 113);
@@ -64,8 +72,8 @@ P(br) = "<br>";
 P(controlPage) = "<br/><a href=\"control\">Juhtimine</a>";
 P(frontPage) = "<br/><a href=\"index\">Avalehele</a>";
 P(settingsPage) = "<br/><a href=\"settings\">Seadistused</a>";
-P(logoutBegin) = "<br/><br/><a href=\"http://logout@";
-P(logoutEnd) = "\">Logi välja</a><br/>";
+//P(logoutBegin) = "<br/><br/><a href=\"http://logout@";
+//P(logoutEnd) = "\">Logi välja</a><br/>";
 P(dot) = ".";
 P(tdS) = "<td>";
 P(tdC) = "</td>";
@@ -122,7 +130,7 @@ void controlCmd(WebServer &server, WebServer::ConnectionType type, char *, bool)
       server.printP(settingsPage);
       
       // logout link
-      server.printP(logoutBegin);
+      /*server.printP(logoutBegin);
       server.print(ip[0]);
       server.printP(dot);
       server.print(ip[1]);
@@ -130,7 +138,7 @@ void controlCmd(WebServer &server, WebServer::ConnectionType type, char *, bool)
       server.print(ip[2]);
       server.printP(dot);
       server.print(ip[3]);
-      server.printP(logoutEnd);
+      server.printP(logoutEnd);*/
       server.printP(footer);
     }
   } else {
@@ -242,7 +250,7 @@ void settingsCmd(WebServer &server, WebServer::ConnectionType type, char *, bool
     server.printP(controlPage);
     
     // logout link
-    server.printP(logoutBegin);
+    /*server.printP(logoutBegin);
     server.print(ip[0]);
     server.printP(dot);
     server.print(ip[1]);
@@ -250,7 +258,7 @@ void settingsCmd(WebServer &server, WebServer::ConnectionType type, char *, bool
     server.print(ip[2]);
     server.printP(dot);
     server.print(ip[3]);
-    server.printP(logoutEnd);
+    server.printP(logoutEnd);*/
     server.printP(footer);
   } else {
     server.httpUnauthorized();
@@ -270,9 +278,9 @@ void ajaxCmd(WebServer &server, WebServer::ConnectionType type, char *, bool) {
       Serial.print(" // ");
       Serial.println(value);
       if ((String)name == "left") {
-        moveLeft(ms/2) ? server.printP(success) : server.printP(failure);
+        moveLeft(ms/4) ? server.printP(success) : server.printP(failure);
       } else if ((String)name == "right") {
-        moveRight(ms/2) ? server.printP(success) : server.printP(failure);
+        moveRight(ms/4) ? server.printP(success) : server.printP(failure);
       }
     }
   }
@@ -285,7 +293,9 @@ void setup() {
   Serial.println("Setup started");
   
   // begin ethernet
-  Ethernet.begin(mac, ip);
+  Serial.print("IP: ");
+  Ethernet.begin(mac);
+  Serial.println(Ethernet.localIP());
   
   // set pinmodes
   pinMode(PIN1, OUTPUT);
@@ -303,16 +313,19 @@ void setup() {
   
   // setting time
   Udp.begin(8888);
-  Serial.println("Ajapäring.");
+  Serial.println("Time.");
   sendNTPpacket(timeServer); 
   do {
     delay(1000);
   } while (!parseNTPPacket());
   
   // set a little delay
+  //setTime(8, 2, 50, 1, 1, 11);
+  
   endTime = millis() + 1000;
-  nextRun = endTime;
-  Serial.println("Läks käima!");
+  nextRun = millis() + 1000;
+  Serial.println("Start!");
+  getTimeString();
 }
 
 
@@ -320,15 +333,71 @@ void loop() {
   // handle web requests
   webserver.processConnection();
   
-  // delay
-  delay(50);
+  handleMoving();
+  
+  if (tests == 0) {
+    moveRight(MAX_TIME);
+    tests++;
+    return;
+  } else if (tests == 1) {
+    if (right) {
+      return;
+    }
+    tests++;
+    return;
+  } else if (tests == 2) {
+    delay(100);
+    moveLeft(MAX_TIME);
+    interval = millis();
+    tests++;
+    return;
+  } else if (tests == 3) {
+    if (left) {
+      return;
+    }
+    interval = millis() - interval;
+    Serial.print("TRIP: ");
+    Serial.println(interval);
+    ms = interval / steps;
+    Serial.print("STEP: ");
+    Serial.println(ms);
+    Serial.print("nxt: ");
+    nextRun = millis() + ms;
+    Serial.println(nextRun);
+    Serial.print("now: ");
+    Serial.println(millis());
+    Serial.print("INTERVAL: ");
+    interval = stop[0] - start[0];
+    interval = interval / steps * 60 * 60 * 1000;
+    Serial.println(interval);
+    tests++;
+    return;
+  }
+  
+  if (leftBtn) {
+    Serial.println("VASAK NUPP");
+    moveLeft(ms/4);
+  } else if (rightBtn) {
+    Serial.println("PAREM NUPP");
+    moveRight(ms/4);
+  }
+  
+  timer();
+}
+
+
+void handleMoving() {// delay
+
+  delay(10);
   
   // lets check the boundaries
   leftEdge = parseAnalog(END1);
   rightEdge = parseAnalog(END2);
+  leftBtn = parseAnalog(BTN1);
+  rightBtn = parseAnalog(BTN2);
   isRunning = checkClock();
   
-  if (!leftEdge && left && endTime > millis()) {
+  if (leftEdge && left && endTime > millis()) {
     //Serial.println("LEFT");
     digitalWrite(PIN1, LOW);
   } else {
@@ -336,15 +405,13 @@ void loop() {
     left = false;
   }
   
-  if (!rightEdge && right && endTime > millis()) {
+  if (rightEdge && right && endTime > millis()) {
     //Serial.println("RIGHT");
     digitalWrite(PIN2, LOW);
   } else {
     digitalWrite(PIN2, HIGH);
     right = false;
   }
-  
-  timer();
 }
 
 
@@ -357,29 +424,45 @@ boolean parseAnalog(byte pin) {
   return reading < 50;
 }
 
-
-boolean moveLeft(int time) {
-  if (!(left || right) && !leftEdge) {
+boolean moveLeft(long time) {
+  if (!(left || right) && leftEdge) {
     Serial.println("MOVE LEFT ");
     left = true;
     endTime = millis() + time;
     return true;
   }
   Serial.println("MOVE LEFT UNSUCCESSFUL");
+  //diag();
   return false;
 }
 
 boolean moveRight(long time) {
-  if (!(left || right) && !rightEdge) {
+  if (!(left || right) && rightEdge) {
     Serial.println("MOVE RIGHT ");
     right = true;
     endTime = millis() + time;
     return true;
   }
   Serial.println("MOVE RIGHT UNSUCCESSFUL");
+  //diag();
   return false;
 }
 
+
+/*void diag() {
+  Serial.print(" leftEdge:");
+  Serial.print(leftEdge);
+  Serial.print(" leftBtn:");
+  Serial.print(analogRead(BTN1));
+  Serial.print(" left:");
+  Serial.print(left);
+  Serial.print(" rightEdge:");
+  Serial.print(rightEdge);
+  Serial.print(" rightBtn:");
+  Serial.print(analogRead(BTN2));
+  Serial.print(" right:");
+  Serial.println(right);
+}*/
 
 // ALARMS
 
@@ -392,14 +475,16 @@ boolean checkClock() {
 void timer() {
   boolean run = nextRun < millis();
   if (run) { // step forward
-    if (isRunning) {
+    if (isRunning && iteration < steps) {
       Serial.println("TIMER");
       nextRun = millis() + interval;
       moveRight(ms);
+      iteration++;
     } else if (hour() == rewind[0] && minute() == rewind[1]) {
       Serial.println("REWIND");
-      moveLeft(30000); // turn right for 30s or until reaches end
+      moveLeft(MAX_TIME); // turn right for 30s or until reaches end
       nextRun = millis() + 60000; // a minute forward
+      iteration = 0;
     }
   }
 }
@@ -510,3 +595,4 @@ int adjustDstEurope() {
     return 7200; // wintertime = utc +2 hour
   }
 }
+
