@@ -7,12 +7,10 @@
 #include <SPI.h>
 #include <Ethernet.h>
 #include <EthernetUdp.h>
-#include <WebServer.h>
 #include <Time.h>
 
 
 // NEID VÕIB VABALT MUUTA
-//byte ip[4] = { 88, 196, 226, 251 };
 byte mac[6] = { 0x90, 0xA2, 0xDA, 0x00, 0xF8, 0x03 };
 byte start[2] = { 6, 30 };
 byte stop[2] = { 18, 30 };
@@ -44,247 +42,10 @@ long nextRun;
 #define NTP_PACKET_SIZE 48
 #define MAX_TIME 21000
 
-WebServer webserver("", 80);
 IPAddress timeServer(193, 40, 5, 113);
 byte packetBuffer[NTP_PACKET_SIZE];
 EthernetUDP Udp;
 
-
-
-P(header) = "<!DOCTYPE html><html><head><title>Solar</title>"
-  "<script type=\"text/javascript\" src=\"http://code.jquery.com/jquery-latest.min.js\"></script>"
-  "<script language=\"javascript\">"
-  "$(document).ready(function() {"
-    "$('input[type=button]').click(function(src) {"
-      "$(\"DIV#status\").hide();"
-      "var data = {}; data[src.target.name] = \"true\";"
-      "$.post(\"ajax\", data, function(data) { $(\"DIV#status\").html(data).fadeIn().delay(1000).fadeOut(); });"
-    "});"
-  "});</script></head><body>";
-P(footer) = "</body></html>";
-P(analog) = "<br/>Analoog ";
-P(colon) = ": ";
-P(button) = "<input type=\"button\" name=\"";
-P(value) = "\" value=\"";
-P(close) = "\"/>";
-P(statusDiv) = "<div id=\"status\" style=\"display:inline\"></div>";
-P(br) = "<br>";
-P(controlPage) = "<br/><a href=\"control\">Juhtimine</a>";
-P(frontPage) = "<br/><a href=\"index\">Avalehele</a>";
-P(settingsPage) = "<br/><a href=\"settings\">Seadistused</a>";
-//P(logoutBegin) = "<br/><br/><a href=\"http://logout@";
-//P(logoutEnd) = "\">Logi välja</a><br/>";
-P(dot) = ".";
-P(tdS) = "<td>";
-P(tdC) = "</td>";
-P(textInput_name) = "<input type=\"text\" name=\"";
-P(textInput_value) = "\" size=\"2\" value=\"";
-P(textInput_close) = "\"/>";
-P(saved) = "Salvestatud!";
-
-void defaultCmd(WebServer &server, WebServer::ConnectionType type, char *, bool) {
-  server.httpSuccess();
-  if (type != WebServer::HEAD) {
-    server.printP(header);
-    server.print(getTimeString());
-    server.printP(br);
-    for (byte i = 0; i < 6; i++) {
-      server.printP(analog);
-      server.print(i);
-      server.printP(colon);
-      server.print(analogRead(i));
-    }
-    server.printP(br);
-    server.printP(controlPage);
-    server.printP(settingsPage);
-    server.printP(footer);
-  }
-}
-
-
-void controlCmd(WebServer &server, WebServer::ConnectionType type, char *, bool) {
-  if (server.checkCredentials("a29udDpyb2xsZXI=")) {
-    server.httpSuccess();
-    if (type != WebServer::HEAD) {
-      server.printP(header);
-      server.print(getTimeString());
-      server.printP(br);
-      server.printP(br);
-      
-      server.printP(button);
-      server.print("left");
-      server.printP(value);
-      server.print("Pööra vasakule");
-      server.printP(close);
-      
-      server.printP(button);
-      server.print("right");
-      server.printP(value);
-      server.print("Pööra paremale");
-      server.printP(close);
-      
-      server.printP(statusDiv);
-      
-      server.printP(br);
-      server.printP(frontPage);
-      server.printP(settingsPage);
-      
-      // logout link
-      /*server.printP(logoutBegin);
-      server.print(ip[0]);
-      server.printP(dot);
-      server.print(ip[1]);
-      server.printP(dot);
-      server.print(ip[2]);
-      server.printP(dot);
-      server.print(ip[3]);
-      server.printP(logoutEnd);*/
-      server.printP(footer);
-    }
-  } else {
-    server.httpUnauthorized();
-  }
-}
-
-void settingsCmd(WebServer &server, WebServer::ConnectionType type, char *, bool) {
-  if (server.checkCredentials("a29udDpyb2xsZXI=")) {
-    server.httpSuccess();
-    if (type == WebServer::POST) {
-      char name[5], value[5];
-      int name_len, value_len;
-      int d, m, y, H, M, S;
-      while (server.readPOSTparam(name, 5, value, 5)) {
-        switch(*name) {
-          case 'd':
-            d = ((String)value).toInt();
-            break;
-          case 'm':
-            m = ((String)value).toInt();
-            break;
-          case 'y':
-            y = ((String)value).toInt();
-            break;
-          case 'H':
-            H = ((String)value).toInt();
-            break;
-          case 'M':
-            M = ((String)value).toInt();
-            break;
-          case 'S':
-            S = ((String)value).toInt();
-            break;
-          default:
-            server.print("unknown ");
-            server.print(name);
-            server.print(":");
-            server.println(value);
-        }
-      }
-      if (y) {
-        setTime(H,M,S,d,m,y);
-        server.print(getTimeString());
-        server.printP(br);
-        server.printP(saved);
-      }
-
-    } else {
-      
-      P(form_start) = "<form method=\"post\">"
-      "<table><tr><td>Päev</td><td>Kuu</td><td>Aasta</td><td>&nbsp;</td><td>Tunnid</td><td>Minutid</td><td>Sekundid</td></tr><tr><td>";
-      P(form_end) = "</td></tr></table><input type=\"submit\" value=\"Save\"/></form>";
-      P(separator) = "\"/></td><td>";
-      
-      time_t t = now(); 
-      
-      server.printP(form_start);
-      
-      // day
-      server.printP(textInput_name);
-      server.print("d");
-      server.printP(textInput_value);
-      server.print(day(t));
-      server.printP(separator);
-      
-      // month
-      server.printP(textInput_name);
-      server.print("m");
-      server.printP(textInput_value);
-      server.print(month(t));
-      server.printP(separator);
-      
-      // year
-      server.printP(textInput_name);
-      server.print("y");
-      server.printP(textInput_value);
-      server.print(year(t));
-      server.printP(separator);
-      
-      server.printP(tdC);
-      server.printP(tdS);
-      
-      // hour
-      server.printP(textInput_name);
-      server.print("H");
-      server.printP(textInput_value);
-      server.print(hour(t));
-      server.printP(separator);
-      
-      // minute
-      server.printP(textInput_name);
-      server.print("M");
-      server.printP(textInput_value);
-      server.print(minute(t));
-      server.printP(separator);
-      
-      // second
-      server.printP(textInput_name);
-      server.print("S");
-      server.printP(textInput_value);
-      server.print(second(t));
-      server.printP(separator);
-      
-      server.printP(form_end);
-    }
-    server.printP(br);
-    server.printP(frontPage);
-    server.printP(controlPage);
-    
-    // logout link
-    /*server.printP(logoutBegin);
-    server.print(ip[0]);
-    server.printP(dot);
-    server.print(ip[1]);
-    server.printP(dot);
-    server.print(ip[2]);
-    server.printP(dot);
-    server.print(ip[3]);
-    server.printP(logoutEnd);*/
-    server.printP(footer);
-  } else {
-    server.httpUnauthorized();
-  }
-    
-}
-
-void ajaxCmd(WebServer &server, WebServer::ConnectionType type, char *, bool) {
-  server.httpSuccess();
-  if (type != WebServer::HEAD && type == WebServer::POST) {
-    P(success) = "<font color=\"green\">Õnnestus</font>";
-    P(failure) = "<font color=\"red\">Ebaõnnestus</font>";
-    char name[10], value[10];
-    while (server.readPOSTparam(name, 10, value, 10)) {
-      Serial.print("POST PARAM: ");
-      Serial.print(name);
-      Serial.print(" // ");
-      Serial.println(value);
-      if ((String)name == "left") {
-        moveLeft(ms/4) ? server.printP(success) : server.printP(failure);
-      } else if ((String)name == "right") {
-        moveRight(ms/4) ? server.printP(success) : server.printP(failure);
-      }
-    }
-  }
-}
 
 
 void setup() {
@@ -303,21 +64,13 @@ void setup() {
   pinMode(PIN2, OUTPUT);
   digitalWrite(PIN2, HIGH);
   
-  // server setup
-  webserver.setDefaultCommand(&defaultCmd);
-  webserver.addCommand("index", &defaultCmd);
-  webserver.addCommand("control", &controlCmd);
-  webserver.addCommand("settings", &settingsCmd);
-  webserver.addCommand("ajax", &ajaxCmd);
-  webserver.begin();
-  
   // setting time
-  Udp.begin(8888);
+  /*Udp.begin(8888);
   Serial.println("Time.");
   sendNTPpacket(timeServer); 
   do {
     delay(1000);
-  } while (!parseNTPPacket());
+  } while (!parseNTPPacket());*/
   
   // set a little delay
   //setTime(8, 2, 50, 1, 1, 11);
@@ -330,8 +83,6 @@ void setup() {
 
 
 void loop() {
-  // handle web requests
-  webserver.processConnection();
   
   handleMoving();
   
