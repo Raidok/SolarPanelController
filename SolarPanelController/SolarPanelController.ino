@@ -8,6 +8,8 @@
 #include <Ethernet.h>
 #include <EthernetUdp.h>
 #include <Time.h>
+#include <Wire.h>
+#include <DS1307RTC.h>
 
 
 // NEID VÕIB VABALT MUUTA
@@ -28,19 +30,25 @@ boolean leftBtn = false;
 boolean rightBtn = false;
 boolean isRunning = false;
 byte tests = 0;
-byte steps = 6;
-byte iteration = 0;
-long endTime;
-long nextRun;
+byte steps = 6; // max steps to be made
+byte iteration = 0; // steps today so far made
+long endTime; // endtime of current movement
+long nextRun; // time of next planned step
 
-#define BTN1 2
-#define BTN2 3
-#define END1 4
-#define END2 5
+#define BTN1 0
+#define BTN2 1
+#define END1 2
+#define END2 3
 #define PIN1 7
 #define PIN2 8
 #define NTP_PACKET_SIZE 48
 #define MAX_TIME 21000
+
+// EEPROM INDEX CONSTANTS
+#define START_H 0
+#define START_M 1
+#define STOP_H 2
+#define STOP_M 3
 
 IPAddress timeServer(193, 40, 5, 113);
 byte packetBuffer[NTP_PACKET_SIZE];
@@ -52,11 +60,12 @@ void setup() {
   // begin serial debugging
   Serial.begin(9600);
   Serial.println("Setup started");
+  setSyncProvider(RTC.get);
   
   // begin ethernet
-  Serial.print("IP: ");
-  Ethernet.begin(mac);
-  Serial.println(Ethernet.localIP());
+  //Serial.print("IP: ");
+  //Ethernet.begin(mac);
+  //Serial.println(Ethernet.localIP());
   
   // set pinmodes
   pinMode(PIN1, OUTPUT);
@@ -77,8 +86,7 @@ void setup() {
   
   endTime = millis() + 1000;
   nextRun = millis() + 1000;
-  Serial.println("Start!");
-  getTimeString();
+  log("INFO", "Start!");
 }
 
 
@@ -106,21 +114,33 @@ void loop() {
     if (left) {
       return;
     }
+    
     interval = millis() - interval;
-    Serial.print("TRIP: ");
-    Serial.println(interval);
+    String str = "Trip length: ";
+    str += interval;
+    str += " ms.";
+    log("INFO", str);
+    
     ms = interval / steps;
-    Serial.print("STEP: ");
-    Serial.println(ms);
-    Serial.print("nxt: ");
+    str = "Step length: ";
+    str += ms;
+    str += " ms.";
+    log("INFO", str);
+    
     nextRun = millis() + ms;
+    /*Serial.print("next: ");
     Serial.println(nextRun);
+    
     Serial.print("now: ");
-    Serial.println(millis());
-    Serial.print("INTERVAL: ");
+    Serial.println(millis());*/
+    
     interval = stop[0] - start[0];
     interval = interval / steps * 60 * 60 * 1000;
-    Serial.println(interval);
+    str = "Interval: ";
+    str += interval;
+    str += " ms.";
+    log("INFO", str);
+    
     tests++;
     return;
   }
@@ -240,15 +260,12 @@ void timer() {
   }
 }
 
-
-// TIME
-
-String getTimeString() {
+void log(String type, String msg) {
   time_t t = now();
   String timeString = "";
-  timeString += day(t);
+  timeString += getDigits(day(t));
   timeString += ".";
-  timeString += month(t);
+  timeString += getDigits(month(t));
   timeString += ".";
   timeString += year(t);
   timeString += " ";
@@ -257,10 +274,15 @@ String getTimeString() {
   timeString += getDigits(minute(t));
   timeString += ":";
   timeString += getDigits(second(t));
-  Serial.print("Web request at ");
-  Serial.println(timeString);
-  return timeString;
+  Serial.print(timeString);
+  Serial.print("|");
+  Serial.print(type);
+  Serial.print("|");
+  Serial.println(msg);
 }
+
+
+// TIME
 
 String getDigits(int digits) {
   String returned = "";
