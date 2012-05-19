@@ -3,6 +3,8 @@
   by Raidok
  */
 
+// morning: T1337408990.
+
 
 #include <SPI.h>
 #include <Ethernet.h>
@@ -392,7 +394,7 @@ void MorningAlarm() {
 }
 
 void MovingAlarm() {
-  alarmId = getTriggeredAlarmId();
+  alarmId = Alarm.getTriggeredAlarmId();
   Serial.print("alarm:");
   Serial.println(alarmId);
   if (rightEdge) {
@@ -400,6 +402,7 @@ void MovingAlarm() {
     moveRight(stepTime); // move it!
   } else {
     log("INFO", "Cycle has reached the end.");
+    NightAlarm();
   }
 }
 
