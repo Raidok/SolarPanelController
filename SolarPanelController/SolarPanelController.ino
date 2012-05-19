@@ -6,19 +6,30 @@
 
 #include <SPI.h>
 #include <Ethernet.h>
-#include <EthernetUdp.h>
 #include <Time.h>
+#include <TimeAlarms.h>
 #include <Wire.h>
 #include <DS1307RTC.h>
-
+#include <EEPROM.h>
 
 // NEID VÕIB VABALT MUUTA
-byte mac[6] = { 0x90, 0xA2, 0xDA, 0x00, 0xF8, 0x03 };
-byte start[2] = { 6, 30 };
-byte stop[2] = { 18, 30 };
-byte rewind[2] = { 3, 30 };
-long interval = 15000;
-long ms = 1000;
+byte temp[6] = { 0x90, 0xA2, 0xDA, 0x00, 0xF8, 0x03 };
+/*
+ * management during time calculation
+ * 0,1 - start time
+ * 2,3 - rewind time
+ * 4 - interval (ms)
+ * 5 - stepTime (ms)
+ * management during runtime
+ * 0 - current step
+ * 
+ */
+/*{ 6, 30 }; { 18, 30 }; { 3, 30 }; */
+unsigned long interval;
+unsigned long stepTime;
+unsigned long endTime;
+char command = '\0'; // nullchar (end of string)
+AlarmID_t alarmId;
 
 
 // SIIT EDASI EI TASU VÄGA PUUTUDA
@@ -28,43 +39,45 @@ boolean leftEdge = false;
 boolean rightEdge = false;
 boolean leftBtn = false;
 boolean rightBtn = false;
-boolean isRunning = false;
-byte tests = 0;
-byte steps = 6; // max steps to be made
-byte iteration = 0; // steps today so far made
-long endTime; // endtime of current movement
-long nextRun; // time of next planned step
 
-#define BTN1 0
-#define BTN2 1
-#define END1 2
-#define END2 3
+#define LEFT_BTN  2
+#define RIGHT_BTN 3
+#define LEFT_END  4
+#define RIGHT_END 5
+
 #define PIN1 7
 #define PIN2 8
-#define NTP_PACKET_SIZE 48
 #define MAX_TIME 21000
 
+
 // EEPROM INDEX CONSTANTS
-#define START_H 0
-#define START_M 1
-#define STOP_H 2
-#define STOP_M 3
+#define EE_START_H      0
+#define EE_START_M      1
+#define EE_REWIND_H     2
+#define EE_REWIND_M     3
+#define EE_INTERVAL_H   4
+#define EE_INTERVAL_L   5
+#define EE_STEP_TIME_H  6
+#define EE_STEP_TIME_L  7
 
-IPAddress timeServer(193, 40, 5, 113);
-byte packetBuffer[NTP_PACKET_SIZE];
-EthernetUDP Udp;
+#define USE_SPECIALIST_METHODS 1
 
+String inputString = "";         // a string to hold incoming data
+boolean stringComplete = false;  // whether the string is complete
 
+/////////////////////////////////// SETUP
 
 void setup() {
   // begin serial debugging
   Serial.begin(9600);
   Serial.println("Setup started");
+  
+  // clock sync
   setSyncProvider(RTC.get);
   
   // begin ethernet
   //Serial.print("IP: ");
-  //Ethernet.begin(mac);
+  //Ethernet.begin(temp);
   //Serial.println(Ethernet.localIP());
   
   // set pinmodes
@@ -72,27 +85,138 @@ void setup() {
   digitalWrite(PIN1, HIGH);
   pinMode(PIN2, OUTPUT);
   digitalWrite(PIN2, HIGH);
+  pinMode(LEFT_BTN, INPUT);
+  pinMode(RIGHT_BTN, INPUT);
+  pinMode(LEFT_END, INPUT);
+  pinMode(RIGHT_END, INPUT);
+
+  // load variables from EEPROM
+  loadFromEeprom();
+
+  // serial input buffer
+  inputString.reserve(20);
   
-  // setting time
-  /*Udp.begin(8888);
-  Serial.println("Time.");
-  sendNTPpacket(timeServer); 
-  do {
-    delay(1000);
-  } while (!parseNTPPacket());*/
-  
-  // set a little delay
-  //setTime(8, 2, 50, 1, 1, 11);
-  
-  endTime = millis() + 1000;
-  nextRun = millis() + 1000;
-  log("INFO", "Start!");
+  // set alarms
+  handleMoving();
+  setAlarms();
 }
 
+
+
+/////////////////////////////////// LOOP
 
 void loop() {
   
   handleMoving();
+  
+  if (!left && !right) { // movement is priority!
+    
+    if (stringComplete) {
+      Serial.println(inputString);
+      command = inputString.charAt(0);
+      handleCommands();
+      inputString = "";
+      stringComplete = false;
+    }
+    
+    if (leftBtn && !left) {
+      Serial.println("VASAK NUPP");
+      moveLeft(stepTime/4);
+    } else if (rightBtn && !right) {
+      Serial.println("PAREM NUPP");
+      moveRight(stepTime/4);
+    }
+  }
+}
+
+
+
+/////////////////////////////////// ACTION FUNCTIONS
+
+void handleMoving() {
+
+  Alarm.delay(1000);
+  
+  // lets check the boundaries
+  /*leftEdge = parseAnalog(END1);
+  rightEdge = parseAnalog(END2);
+  leftBtn = parseAnalog(BTN1);
+  rightBtn = parseAnalog(BTN2);*/
+  leftEdge = digitalRead(LEFT_END);
+  rightEdge = digitalRead(RIGHT_END);
+  leftBtn = digitalRead(LEFT_BTN);
+  rightBtn = digitalRead(RIGHT_BTN);
+  
+  Serial.print(leftEdge);
+  Serial.print(" ");
+  Serial.print(rightEdge);
+  Serial.print(" ");
+  Serial.print(leftBtn);
+  Serial.print(" ");
+  Serial.println(rightBtn);
+  
+  if (leftEdge && left && millis() < endTime) {
+    //Serial.println("LEFT");
+    digitalWrite(PIN1, HIGH);
+  } else {
+    digitalWrite(PIN1, LOW);
+    left = false;
+  }
+  
+  if (rightEdge && right && millis() < endTime) {
+    //Serial.println("RIGHT");
+    digitalWrite(PIN2, HIGH);
+  } else {
+    digitalWrite(PIN2, LOW);
+    right = false;
+  }
+}
+
+boolean moveLeft(long time) {
+  if (!(left || right) && leftEdge) {
+    String str = "Moving left for ";
+    str += time;
+    str += " ms!";
+    log("INFO", str);
+    left = true;
+    endTime = millis() + time;
+    return true;
+  }
+  String str = "Moving left for ";
+  str += time;
+  str += " ms failed! Left:";
+  str += left;
+  str += " Right:";
+  str += right;
+  str += " LeftEdge:";
+  str += leftEdge;
+  log("INFO", str);
+  return false;
+}
+
+boolean moveRight(long time) {
+  if (!(left || right) && rightEdge) {
+    String str = "Moving right for ";
+    str += time;
+    str += " ms!";
+    log("INFO", str);
+    right = true;
+    endTime = millis() + time;
+    return true;
+  }
+  String str = "Moving right for ";
+  str += time;
+  str += " ms failed! Left:";
+  str += left;
+  str += " Right:";
+  str += right;
+  str += " RightEdge:";
+  str += rightEdge;
+  log("INFO", str);
+  return false;
+}
+
+/*void runTest() {
   
   if (tests == 0) {
     moveRight(MAX_TIME);
@@ -128,11 +252,6 @@ void loop() {
     log("INFO", str);
     
     nextRun = millis() + ms;
-    /*Serial.print("next: ");
-    Serial.println(nextRun);
-    
-    Serial.print("now: ");
-    Serial.println(millis());*/
     
     interval = stop[0] - start[0];
     interval = interval / steps * 60 * 60 * 1000;
@@ -144,47 +263,67 @@ void loop() {
     tests++;
     return;
   }
-  
-  if (leftBtn) {
-    Serial.println("VASAK NUPP");
-    moveLeft(ms/4);
-  } else if (rightBtn) {
-    Serial.println("PAREM NUPP");
-    moveRight(ms/4);
+}*/
+
+
+
+/////////////////////////////////// HELPERS
+
+void handleCommands() {
+  switch (command) {
+    case '\0':
+      // do nothing
+      break;
+    case 'R':
+      //log("DEBUG", "Read command requested!");
+      loadFromEeprom();
+      break;
+    case 'W':
+      log("DEBUG", "Write command requested!");
+      writeToEeprom();
+      break;
+    case 'T':
+      log("DEBUG", "Time set command requested!");
+      setMyTime(stringToTime(inputString));
+      break;
+    default:
+      String str = "Unknown command \'";
+      str += command;
+      str += "\' requested!";
+      log("DEBUG", str);
   }
-  
-  timer();
+  command = ' '; // reset
+  Serial.flush();
 }
 
-
-void handleMoving() {// delay
-
-  delay(10);
-  
-  // lets check the boundaries
-  leftEdge = parseAnalog(END1);
-  rightEdge = parseAnalog(END2);
-  leftBtn = parseAnalog(BTN1);
-  rightBtn = parseAnalog(BTN2);
-  isRunning = checkClock();
-  
-  if (leftEdge && left && endTime > millis()) {
-    //Serial.println("LEFT");
-    digitalWrite(PIN1, LOW);
-  } else {
-    digitalWrite(PIN1, HIGH);
-    left = false;
-  }
-  
-  if (rightEdge && right && endTime > millis()) {
-    //Serial.println("RIGHT");
-    digitalWrite(PIN2, LOW);
-  } else {
-    digitalWrite(PIN2, HIGH);
-    right = false;
-  }
+void log(String type, String msg) {
+  time_t t = now();
+  String logString = "";
+  logString.reserve(200);
+  logString += getDigits(day(t));
+  logString += ".";
+  logString += getDigits(month(t));
+  logString += ".";
+  logString += year(t);
+  logString += " ";
+  logString += getDigits(hour(t));
+  logString += ":";
+  logString += getDigits(minute(t));
+  logString += ":";
+  logString += getDigits(second(t));
+  logString += "|";
+  logString += type;
+  logString += "|";
+  logString += msg;
+  Serial.println(logString);
 }
 
+String getDigits(int digits) {
+  String returned = "";
+  if (digits < 10) returned += "0";
+  returned += digits;
+  return returned;
+}
 
 boolean parseAnalog(byte pin) {
   /*Serial.print("ANALOG PIN ");
@@ -195,177 +334,128 @@ boolean parseAnalog(byte pin) {
   return reading < 50;
 }
 
-boolean moveLeft(long time) {
-  if (!(left || right) && leftEdge) {
-    Serial.println("MOVE LEFT ");
-    left = true;
-    endTime = millis() + time;
-    return true;
+void loadFromEeprom() {
+  String str = "EEPROM";
+  for (byte i = 0; i < 4; i++) {
+    temp[i] = EEPROM.read(i);
+    str += " ";
+    str += i;
+    str += ":";
+    str += temp[i];
   }
-  Serial.println("MOVE LEFT UNSUCCESSFUL");
-  //diag();
-  return false;
+  
+  // read interval 
+  interval = EEPROM.read(EE_INTERVAL_H) << 8;
+  interval |= EEPROM.read(EE_INTERVAL_L);
+  str += " 4-5: ";
+  str += interval;
+  
+  // read stepTime
+  stepTime = EEPROM.read(EE_STEP_TIME_H) << 8;
+  stepTime |= EEPROM.read(EE_STEP_TIME_L);
+  str += " 6-7: ";
+  str += stepTime;
+  log("DEBUG", str);
 }
 
-boolean moveRight(long time) {
-  if (!(left || right) && rightEdge) {
-    Serial.println("MOVE RIGHT ");
-    right = true;
-    endTime = millis() + time;
-    return true;
+void writeToEeprom() {
+  EEPROM.write(EE_START_H, 6);
+  EEPROM.write(EE_START_M, 30);
+  EEPROM.write(EE_REWIND_H, 3);
+  EEPROM.write(EE_REWIND_M, 30);
+  interval = 10; // seconds
+  EEPROM.write(EE_INTERVAL_H, highByte(interval));
+  EEPROM.write(EE_INTERVAL_L, lowByte(interval));
+  stepTime = 4000; // milliseconds
+  EEPROM.write(EE_STEP_TIME_H, highByte(stepTime));
+  EEPROM.write(EE_STEP_TIME_L, lowByte(stepTime));
+}
+
+
+/////////////////////////////////// ALARMS
+
+void setAlarms() {
+  log("INFO", "Setting alarms!");
+  Alarm.alarmRepeat(temp[0], temp[1], 0, MorningAlarm); // first in the morning
+  Alarm.timerRepeat(interval, MovingAlarm);
+  Alarm.alarmRepeat(temp[2], temp[3], 0, RewindAlarm); // rewind at night
+  if (leftEdge && rightEdge) {
+    MovingAlarm(); // in case the cycle has started at the time of restarting
   }
-  Serial.println("MOVE RIGHT UNSUCCESSFUL");
-  //diag();
-  return false;
+}
+
+void MorningAlarm() {
+  log("INFO", "Good morning!");
+  Alarm.timerRepeat(interval, MovingAlarm);
+  MovingAlarm();
+  Alarm.enable(alarmId);
+}
+
+void MovingAlarm() {
+  alarmId = getTriggeredAlarmId();
+  Serial.print("alarm:");
+  Serial.println(alarmId);
+  if (rightEdge) {
+    log("INFO", "This just moved!!");
+    moveRight(stepTime); // move it!
+  } else {
+    log("INFO", "Cycle has reached the end.");
+  }
+}
+
+void NightAlarm() {
+  log("INFO", "Good night!");
+  Alarm.disable(alarmId);
+}
+
+void RewindAlarm() {
+  log("INFO", "Rewinded.");
+  moveLeft(MAX_TIME); // turn it for 30 seconds or until reaches end
 }
 
 
-/*void diag() {
-  Serial.print(" leftEdge:");
-  Serial.print(leftEdge);
-  Serial.print(" leftBtn:");
-  Serial.print(analogRead(BTN1));
-  Serial.print(" left:");
-  Serial.print(left);
-  Serial.print(" rightEdge:");
-  Serial.print(rightEdge);
-  Serial.print(" rightBtn:");
-  Serial.print(analogRead(BTN2));
-  Serial.print(" right:");
-  Serial.println(right);
-}*/
 
-// ALARMS
+/////////////////////////////////// TIME
 
-boolean checkClock() {
-  return (hour() > start[0] && hour() < stop[0]) ||
-    (hour() == start[0] && minute() >= start[1]) ||
-    (hour() == stop[0] && minute() <= stop[1]);
+void setMyTime(unsigned long t) {
+  if (t > 0) {
+    RTC.set(t);
+    setTime(t);
+  }
+  String str = "Time set to ";
+  str += t;
+  log("INFO", str);
 }
 
-void timer() {
-  boolean run = nextRun < millis();
-  if (run) { // step forward
-    if (isRunning && iteration < steps) {
-      Serial.println("TIMER");
-      nextRun = millis() + interval;
-      moveRight(ms);
-      iteration++;
-    } else if (hour() == rewind[0] && minute() == rewind[1]) {
-      Serial.println("REWIND");
-      moveLeft(MAX_TIME); // turn right for 30s or until reaches end
-      nextRun = millis() + 60000; // a minute forward
-      iteration = 0;
+time_t stringToTime(String str) {
+  time_t pctime = 0;
+  String strlog = "String is ";
+  strlog += str;
+  log("INFO", strlog);
+  for (int i = 0; i < str.length(); i++) {
+    char c = str.charAt(i);
+    if( c >= '0' && c <= '9') {
+      pctime = (10 * pctime) + (c - '0') ; // convert digits to a number
     }
   }
-}
-
-void log(String type, String msg) {
-  time_t t = now();
-  String timeString = "";
-  timeString += getDigits(day(t));
-  timeString += ".";
-  timeString += getDigits(month(t));
-  timeString += ".";
-  timeString += year(t);
-  timeString += " ";
-  timeString += getDigits(hour(t));
-  timeString += ":";
-  timeString += getDigits(minute(t));
-  timeString += ":";
-  timeString += getDigits(second(t));
-  Serial.print(timeString);
-  Serial.print("|");
-  Serial.print(type);
-  Serial.print("|");
-  Serial.println(msg);
+  return pctime;
 }
 
 
-// TIME
 
-String getDigits(int digits) {
-  String returned = "";
-  if (digits < 10) returned += "0";
-  returned += digits;
-  return returned;
-}
 
-// send an NTP request to the time server at the given address 
-unsigned long sendNTPpacket(IPAddress &address) {
-  // set all bytes in the buffer to 0
-  memset(packetBuffer, 0, NTP_PACKET_SIZE);
-  // Initialize values needed to form NTP request
-  // (see URL above for details on the packets)
-  packetBuffer[0] = 0b11100011; // LI, Version, Mode
-  packetBuffer[1] = 0; // Stratum, or type of clock
-  packetBuffer[2] = 6; // Polling Interval
-  packetBuffer[3] = 0xEC; // Peer Clock Precision
-  // 8 bytes of zero for Root Delay & Root Dispersion
-  packetBuffer[12] = 49; 
-  packetBuffer[13] = 0x4E;
-  packetBuffer[14] = 49;
-  packetBuffer[15] = 52;
+/////////////////////////////////// SERIAL
 
-  // all NTP fields have been given values, now
-  // you can send a packet requesting a timestamp:
-  Udp.beginPacket(address, 123); //NTP requests are to port 123
-  Udp.write(packetBuffer,NTP_PACKET_SIZE);
-  Udp.endPacket();
-}
 
-boolean parseNTPPacket() {
-  Serial.println("Checking for incoming packets.");
-  // check if we've received a packet
-  if ( Udp.parsePacket() ) {
-    Serial.println("Parsing packet.");
-    // read the received packet into the buffer
-    Udp.read(packetBuffer, NTP_PACKET_SIZE);
-    //the timestamp starts at byte 40 of the received packet and is four bytes,
-    // or two words, long. First, extract the two words:
-    unsigned long highWord = word(packetBuffer[40], packetBuffer[41]);
-    unsigned long lowWord = word(packetBuffer[42], packetBuffer[43]);  
-    // combine the four bytes (two words) into a long integer
-    // this is NTP time (seconds since Jan 1 1900):
-    unsigned long secsSince1900 = highWord << 16 | lowWord;  
-    Serial.print("Seconds since Jan 1 1900 = " );
-    Serial.println(secsSince1900);
-    // since Time library uses Unix timestamp, we do this
-    Serial.print("Unix time = ");
-    // Unix time starts on Jan 1 1970. In seconds, that's 2208988800:
-    const unsigned long seventyYears = 2208988800UL;     
-    // subtract seventy years
-    unsigned long epoch = secsSince1900 - seventyYears;
-    // print Unix time:
-    Serial.println(epoch);
-    // adjust it
-    epoch += adjustDstEurope();
-    // set the Arduino's clock to that
-    setTime(epoch);
-    // done
-    return true;
-  }
-  // if we reach this, no packets were received (yet)
-  Serial.println("No packets yet!");
-  return false;
-}
-
-// Daylight saving time adjustment
-// source http://www.arduino.cc/cgi-bin/yabb2/YaBB.pl?num=1291637975/10#10
-int adjustDstEurope() {
-  // last sunday of march
-  int beginDSTDate = (31 - (5 * year() / 4 + 4) % 7);
-  int beginDSTMonth = 3;
-  //last sunday of october
-  int endDSTDate = (31 - (5 * year() / 4 + 1) % 7);
-  int endDSTMonth = 10;
-  // DST is valid as:
-  if (((month() > beginDSTMonth) && (month() < endDSTMonth))
-    || ((month() == beginDSTMonth) && (day() >= beginDSTDate))
-    || ((month() == endDSTMonth) && (day() <= endDSTDate))) {
-    return 10800;  // summertime = utc +3 hour
-  } else {
-    return 7200; // wintertime = utc +2 hour
+void serialEvent() {
+  while (Serial.available()) {
+    char inChar = (char)Serial.read();
+    if (inChar == '.') {
+      stringComplete = true;
+      inChar = '\0'; // nullchar (end of string)
+    }
+    inputString += inChar;
   }
 }
+
 
