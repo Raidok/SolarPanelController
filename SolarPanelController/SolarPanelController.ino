@@ -3,7 +3,7 @@
   by Raidok
  */
 
-// morning: T1337408990.
+// morning: T1337408990
 
 
 #include <SPI.h>
@@ -27,8 +27,8 @@ byte temp[6] = { 0x90, 0xA2, 0xDA, 0x00, 0xF8, 0x03 };
  * 
  */
 /*{ 6, 30 }; { 18, 30 }; { 3, 30 }; */
-unsigned long interval;
-unsigned long stepTime;
+unsigned long interval = 10;
+unsigned long stepTime = 5000;
 unsigned long endTime;
 char command = '\0'; // nullchar (end of string)
 AlarmID_t alarmId;
@@ -47,22 +47,23 @@ boolean rightBtn = false;
 #define LEFT_END  4
 #define RIGHT_END 5
 
-#define PIN1 7
-#define PIN2 8
+#define MOVE_LEFT 7
+#define MOVE_RIGHT 8
 #define MAX_TIME 21000
 
 
 // EEPROM INDEX CONSTANTS
+#define EE_RUNTIME_VARS 6
 #define EE_START_H      0
 #define EE_START_M      1
-#define EE_REWIND_H     2
-#define EE_REWIND_M     3
-#define EE_INTERVAL_H   4
-#define EE_INTERVAL_L   5
-#define EE_STEP_TIME_H  6
-#define EE_STEP_TIME_L  7
-
-#define USE_SPECIALIST_METHODS 1
+#define EE_STOP_H       2
+#define EE_STOP_M       3
+#define EE_REWIND_H     4
+#define EE_REWIND_M     5
+#define EE_INTERVAL_H   6
+#define EE_INTERVAL_L   7
+#define EE_STEP_TIME_H  8
+#define EE_STEP_TIME_L  9
 
 String inputString = "";         // a string to hold incoming data
 boolean stringComplete = false;  // whether the string is complete
@@ -83,18 +84,24 @@ void setup() {
   //Serial.println(Ethernet.localIP());
   
   // set pinmodes
-  pinMode(PIN1, OUTPUT);
-  digitalWrite(PIN1, HIGH);
-  pinMode(PIN2, OUTPUT);
-  digitalWrite(PIN2, HIGH);
+  pinMode(MOVE_LEFT, OUTPUT);
+  //digitalWrite(PIN1, HIGH);
+  pinMode(MOVE_RIGHT, OUTPUT);
+  //digitalWrite(PIN2, HIGH);
   pinMode(LEFT_BTN, INPUT);
   pinMode(RIGHT_BTN, INPUT);
   pinMode(LEFT_END, INPUT);
   pinMode(RIGHT_END, INPUT);
 
-  // load variables from EEPROM
-  loadFromEeprom();
-
+  // load runtime variables
+  //loadFromEeprom();
+  temp[0] = 6;
+  temp[1] = 30;
+  temp[2] = 18;
+  temp[3] = 38;
+  temp[4] = 2;
+  temp[5] = 20;
+  
   // serial input buffer
   inputString.reserve(20);
   
@@ -149,27 +156,27 @@ void handleMoving() {
   leftBtn = digitalRead(LEFT_BTN);
   rightBtn = digitalRead(RIGHT_BTN);
   
-  Serial.print(leftEdge);
+  /*Serial.print(leftEdge);
   Serial.print(" ");
   Serial.print(rightEdge);
   Serial.print(" ");
   Serial.print(leftBtn);
   Serial.print(" ");
-  Serial.println(rightBtn);
+  Serial.println(rightBtn);*/
   
   if (leftEdge && left && millis() < endTime) {
     //Serial.println("LEFT");
-    digitalWrite(PIN1, HIGH);
+    digitalWrite(MOVE_LEFT, HIGH);
   } else {
-    digitalWrite(PIN1, LOW);
+    digitalWrite(MOVE_LEFT, LOW);
     left = false;
   }
   
   if (rightEdge && right && millis() < endTime) {
     //Serial.println("RIGHT");
-    digitalWrite(PIN2, HIGH);
+    digitalWrite(MOVE_RIGHT, HIGH);
   } else {
-    digitalWrite(PIN2, LOW);
+    digitalWrite(MOVE_RIGHT, LOW);
     right = false;
   }
 }
@@ -272,21 +279,31 @@ boolean moveRight(long time) {
 /////////////////////////////////// HELPERS
 
 void handleCommands() {
+  String str = "Returned: ";
   switch (command) {
     case '\0':
       // do nothing
       break;
+    case 'C':
+      log("DEBUG", "Progress calculation command requested!");
+      str += calculateProgress();
+      log("DEBUG", str);
+      break;
     case 'R':
-      //log("DEBUG", "Read command requested!");
+      log("DEBUG", "Read command requested!");
       loadFromEeprom();
       break;
     case 'W':
       log("DEBUG", "Write command requested!");
       writeToEeprom();
       break;
+    case 'P':
+      log("DEBUG", "Permanent time set command requested!");
+      setPermTime(stringToTime(inputString));
+      break;
     case 'T':
-      log("DEBUG", "Time set command requested!");
-      setMyTime(stringToTime(inputString));
+      log("DEBUG", "Temporary time set command requested!");
+      setTempTime(stringToTime(inputString));
       break;
     default:
       String str = "Unknown command \'";
@@ -297,6 +314,44 @@ void handleCommands() {
   command = ' '; // reset
   Serial.flush();
 }
+
+int calculateProgress() {
+  int progress = 0; // return variable
+  time_t current = now(); // save current time
+  tmElements_t elements; // create start time for comparsion
+  breakTime(current, elements); // break time into elements
+  elements.Second = 0; // set set start time
+  elements.Hour = temp[0];
+  elements.Minute = temp[1];
+  time_t start = makeTime(elements); // convert back to timestamp
+  
+  if (current > start) { // if the cycle has started today
+    elements.Hour = temp[2]; // reuse elements to create stop time timestamp
+    elements.Minute = temp[3];
+    time_t stop = makeTime(elements); // make the timestamp
+    if (current < stop) {
+      progress = (current-start)*100/(stop-start); // calculate progress
+    } else {
+      progress = 100;
+    }
+  } else {
+    //breakTime(nextMidnight(current), elements); // lets make an elements object holding next day's date
+    elements.Hour = temp[4]; // set the rewind time
+    elements.Minute = temp[5];
+    time_t rewind = makeTime(elements); // make the timestamp
+    if (current < rewind) {
+      progress = 100;
+    }
+  }
+  String str = "Current progress: ";
+  str += progress;
+  str += "%.";
+  log("DEBUG", str);
+  return progress;
+}
+
+
+/////////////////////////////////// LOGGING
 
 void log(String type, String msg) {
   time_t t = now();
@@ -327,18 +382,13 @@ String getDigits(int digits) {
   return returned;
 }
 
-boolean parseAnalog(byte pin) {
-  /*Serial.print("ANALOG PIN ");
-  Serial.print(pin);
-  Serial.print(" : ");*/
-  int reading = analogRead(pin);
-  //Serial.println(reading);
-  return reading < 50;
-}
+
+
+/////////////////////////////////// STORING VARIABLES
 
 void loadFromEeprom() {
-  String str = "EEPROM";
-  for (byte i = 0; i < 4; i++) {
+  String str = "READ EEPROM";
+  for (byte i = 0; i < EE_RUNTIME_VARS; i++) {
     temp[i] = EEPROM.read(i);
     str += " ";
     str += i;
@@ -349,28 +399,39 @@ void loadFromEeprom() {
   // read interval 
   interval = EEPROM.read(EE_INTERVAL_H) << 8;
   interval |= EEPROM.read(EE_INTERVAL_L);
-  str += " 4-5: ";
+  str += " 6-7: ";
   str += interval;
   
   // read stepTime
   stepTime = EEPROM.read(EE_STEP_TIME_H) << 8;
   stepTime |= EEPROM.read(EE_STEP_TIME_L);
-  str += " 6-7: ";
+  str += " 8-9: ";
   str += stepTime;
   log("DEBUG", str);
 }
 
 void writeToEeprom() {
-  EEPROM.write(EE_START_H, 6);
-  EEPROM.write(EE_START_M, 30);
-  EEPROM.write(EE_REWIND_H, 3);
-  EEPROM.write(EE_REWIND_M, 30);
+  String str = "WRITE EEPROM";
+  for (int i = 0; i < EE_RUNTIME_VARS; i++) {
+    EEPROM.write(i, temp[i]);
+    str += " ";
+    str += i;
+    str += ":";
+    str += temp[i];
+  }
+  
   interval = 10; // seconds
   EEPROM.write(EE_INTERVAL_H, highByte(interval));
   EEPROM.write(EE_INTERVAL_L, lowByte(interval));
-  stepTime = 4000; // milliseconds
+  str += " 6-7: ";
+  str += interval;
+  
+  stepTime = 5000; // milliseconds
   EEPROM.write(EE_STEP_TIME_H, highByte(stepTime));
   EEPROM.write(EE_STEP_TIME_L, lowByte(stepTime));
+  str += " 8-9: ";
+  str += stepTime;
+  log("DEBUG", str);
 }
 
 
@@ -379,18 +440,19 @@ void writeToEeprom() {
 void setAlarms() {
   log("INFO", "Setting alarms!");
   Alarm.alarmRepeat(temp[0], temp[1], 0, MorningAlarm); // first in the morning
-  Alarm.timerRepeat(interval, MovingAlarm);
-  Alarm.alarmRepeat(temp[2], temp[3], 0, RewindAlarm); // rewind at night
-  if (leftEdge && rightEdge) {
-    MovingAlarm(); // in case the cycle has started at the time of restarting
-  }
+  Alarm.alarmRepeat(temp[2], temp[3], 0, NightAlarm); // stop at night
+  Alarm.alarmRepeat(temp[4], temp[5], 0, RewindAlarm); // rewind
+  time_t time = now();
+  /*if () {
+    Alarm.timerOnce(5, MovingAlarm); // in case the cycle has started at the time of restarting
+  }*/
 }
 
 void MorningAlarm() {
   log("INFO", "Good morning!");
-  Alarm.timerRepeat(interval, MovingAlarm);
-  MovingAlarm();
-  Alarm.enable(alarmId);
+  Alarm.timerOnce(5, MovingAlarm);
+  //MovingAlarm();
+  //Alarm.enable(alarmId);
 }
 
 void MovingAlarm() {
@@ -400,6 +462,7 @@ void MovingAlarm() {
   if (rightEdge) {
     log("INFO", "This just moved!!");
     moveRight(stepTime); // move it!
+    Alarm.timerOnce(interval, MovingAlarm);
   } else {
     log("INFO", "Cycle has reached the end.");
     NightAlarm();
@@ -412,7 +475,7 @@ void NightAlarm() {
 }
 
 void RewindAlarm() {
-  log("INFO", "Rewinded.");
+  log("INFO", "Rewind.");
   moveLeft(MAX_TIME); // turn it for 30 seconds or until reaches end
 }
 
@@ -420,12 +483,21 @@ void RewindAlarm() {
 
 /////////////////////////////////// TIME
 
-void setMyTime(unsigned long t) {
+void setPermTime(unsigned long t) {
   if (t > 0) {
     RTC.set(t);
     setTime(t);
   }
   String str = "Time set to ";
+  str += t;
+  log("INFO", str);
+}
+
+void setTempTime(unsigned long t) {
+  if (t > 0) {
+    setTime(t);
+  }
+  String str = "Time temporarly set to ";
   str += t;
   log("INFO", str);
 }
@@ -453,7 +525,7 @@ time_t stringToTime(String str) {
 void serialEvent() {
   while (Serial.available()) {
     char inChar = (char)Serial.read();
-    if (inChar == '.') {
+    if (inChar == '\n') {
       stringComplete = true;
       inChar = '\0'; // nullchar (end of string)
     }
