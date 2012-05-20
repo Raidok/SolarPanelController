@@ -30,6 +30,7 @@ byte temp[6] = { 0x90, 0xA2, 0xDA, 0x00, 0xF8, 0x03 };
 unsigned long interval = 10;
 unsigned long stepTime = 5000;
 unsigned long endTime;
+unsigned long eventTime;
 char command = '\0'; // nullchar (end of string)
 AlarmID_t alarmId;
 
@@ -144,7 +145,7 @@ void loop() {
 
 void handleMoving() {
 
-  Alarm.delay(1000);
+  Alarm.delay(100);
   
   // lets check the boundaries
   /*leftEdge = parseAnalog(END1);
@@ -164,24 +165,35 @@ void handleMoving() {
   Serial.print(" ");
   Serial.println(rightBtn);*/
   
-  if (leftEdge && left && millis() < endTime) {
-    //Serial.println("LEFT");
-    digitalWrite(MOVE_LEFT, HIGH);
-  } else {
-    digitalWrite(MOVE_LEFT, LOW);
-    left = false;
-  }
-  
-  if (rightEdge && right && millis() < endTime) {
-    //Serial.println("RIGHT");
-    digitalWrite(MOVE_RIGHT, HIGH);
-  } else {
-    digitalWrite(MOVE_RIGHT, LOW);
-    right = false;
+  if (left) {
+    if (leftEdge && millis() < endTime) {
+      //Serial.println("LEFT");
+      digitalWrite(MOVE_LEFT, HIGH);
+    } else if (!leftBtn || !leftEdge) { // if button isn't still pressed or has reached the end
+      digitalWrite(MOVE_LEFT, LOW);
+      left = false;
+      eventTime = millis() - eventTime;
+    }
+  } else if (right) { 
+    if (rightEdge && millis() < endTime) {
+      //Serial.println("RIGHT");
+      digitalWrite(MOVE_RIGHT, HIGH);
+    } else if (!rightBtn || !rightEdge) { // if button isn't still pressed or has reached the end
+      digitalWrite(MOVE_RIGHT, LOW);
+      right = false;
+      eventTime = millis() - eventTime;
+    }
+  } else if (eventTime > 0) {
+    String str = "Last action time: ";
+    str += eventTime;
+    str += " ms.";
+    log("DEBUG", str);
+    eventTime = 0;
   }
 }
 
 boolean moveLeft(long time) {
+  eventTime = millis();
   if (!(left || right) && leftEdge) {
     String str = "Moving left for ";
     str += time;
@@ -204,6 +216,7 @@ boolean moveLeft(long time) {
 }
 
 boolean moveRight(long time) {
+  eventTime = millis();
   if (!(left || right) && rightEdge) {
     String str = "Moving right for ";
     str += time;
@@ -311,8 +324,6 @@ void handleCommands() {
       str += "\' requested!";
       log("DEBUG", str);
   }
-  command = ' '; // reset
-  Serial.flush();
 }
 
 int calculateProgress() {
