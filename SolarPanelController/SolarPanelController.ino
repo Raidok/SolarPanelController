@@ -119,7 +119,7 @@ void loop() {
   
   handleMoving();
   
-  if (!left && !right) { // movement is priority!
+  if (!left && !right && eventTime == 0) { // movement is priority!
     
     if (stringComplete) {
       Serial.println(inputString);
@@ -193,7 +193,6 @@ void handleMoving() {
 }
 
 boolean moveLeft(long time) {
-  eventTime = millis();
   if (!(left || right) && leftEdge) {
     String str = "Moving left for ";
     str += time;
@@ -201,6 +200,7 @@ boolean moveLeft(long time) {
     log("INFO", str);
     left = true;
     endTime = millis() + time;
+    eventTime = millis();
     return true;
   }
   String str = "Moving left for ";
@@ -216,7 +216,6 @@ boolean moveLeft(long time) {
 }
 
 boolean moveRight(long time) {
-  eventTime = millis();
   if (!(left || right) && rightEdge) {
     String str = "Moving right for ";
     str += time;
@@ -224,6 +223,7 @@ boolean moveRight(long time) {
     log("INFO", str);
     right = true;
     endTime = millis() + time;
+    eventTime = millis();
     return true;
   }
   String str = "Moving right for ";
