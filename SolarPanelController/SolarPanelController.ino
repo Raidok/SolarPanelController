@@ -3,7 +3,6 @@
   by Raidok
  */
 
-// morning: T1337408990
 
 
 #include <SPI.h>
@@ -14,34 +13,31 @@
 #include <DS1307RTC.h>
 #include <EEPROM.h>
 
-// NEID VÕIB VABALT MUUTA
+
+
+// array for temporary values, initally used for MAC-address,
+// later holds start, stop and rewind times
 byte temp[6] = { 0x90, 0xA2, 0xDA, 0x00, 0xF8, 0x03 };
-/*
- * management during time calculation
- * 0,1 - start time
- * 2,3 - rewind time
- * 4 - interval (ms)
- * 5 - stepTime (ms)
- * management during runtime
- * 0 - current step
- * 
- */
-/*{ 6, 30 }; { 18, 30 }; { 3, 30 }; */
-unsigned long interval = 10;
-unsigned long stepTime = 5000;
+// run interval, in seconds
+unsigned long interval = 10; // TODO: remove value
+// lenght of one step, in milliseconds
+unsigned long stepTime = 5000; // TODO: remove value
+// time when current movement should end, in milliseconds
 unsigned long endTime;
+// for measuring how long current movement lasted
 unsigned long eventTime;
+// command char
 char command = '\0'; // nullchar (end of string)
+//
 AlarmID_t alarmId;
 
-
-// SIIT EDASI EI TASU VÄGA PUUTUDA
 boolean left = false;
 boolean right = false;
 boolean leftEdge = false;
 boolean rightEdge = false;
 boolean leftBtn = false;
 boolean rightBtn = false;
+
 
 #define LEFT_BTN  2
 #define RIGHT_BTN 3
@@ -53,18 +49,23 @@ boolean rightBtn = false;
 #define MAX_TIME 21000
 
 
+
 // EEPROM INDEX CONSTANTS
+
 #define EE_RUNTIME_VARS 6
+
 #define EE_START_H      0
 #define EE_START_M      1
 #define EE_STOP_H       2
 #define EE_STOP_M       3
 #define EE_REWIND_H     4
 #define EE_REWIND_M     5
+
 #define EE_INTERVAL_H   6
 #define EE_INTERVAL_L   7
 #define EE_STEP_TIME_H  8
 #define EE_STEP_TIME_L  9
+
 
 String inputString = "";         // a string to hold incoming data
 boolean stringComplete = false;  // whether the string is complete
