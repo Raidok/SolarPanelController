@@ -3,7 +3,28 @@
   by Raidok
  */
 
+
 #define LOGLEVEL LOG_LEVEL_DEBUG
+
+#define LEFT_BTN  2
+#define RIGHT_BTN 3
+#define LEFT_END  4
+#define RIGHT_END 5
+
+#define MOVE_LEFT 7
+#define MOVE_RIGHT 8
+#define MAX_TIME 21000
+
+#define LEFT_BTN  2
+#define RIGHT_BTN 3
+#define LEFT_END  4
+#define RIGHT_END 5
+
+#define MOVE_LEFT 7
+#define MOVE_RIGHT 8
+#define MAX_TIME 21000
+
+
 
 #include <SPI.h>
 #include <Ethernet.h>
@@ -31,14 +52,7 @@ unsigned long interval = 10; // TODO: remove value
 Controller controller((byte*)&temp, MOVE_LEFT, MOVE_RIGHT, LEFT_END, RIGHT_END, LEFT_BTN, RIGHT_BTN);
 
 
-#define LEFT_BTN  2
-#define RIGHT_BTN 3
-#define LEFT_END  4
-#define RIGHT_END 5
 
-#define MOVE_LEFT 7
-#define MOVE_RIGHT 8
-#define MAX_TIME 21000
 
 
 String inputString = "";         // a string to hold incoming data
