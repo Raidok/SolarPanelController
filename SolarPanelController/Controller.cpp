@@ -9,20 +9,28 @@
 #include <EEPROM.h>
 #include <Time.h>
 
-#ifdef DS1307RTC_h
+#ifndef DS1307RTC_h
 #include <DS1307RTC.h>
 #endif
 
+#define LEFT_BTN  2
+#define RIGHT_BTN 3
+#define LEFT_END  4
+#define RIGHT_END 5
+
+#define MOVE_LEFT 7
+#define MOVE_RIGHT 8
+
 // this array holds start, stop and rewind times
 byte* _times;
+// run interval, in seconds
+unsigned long interval; // TODO: remove value
 // lenght of one step, in milliseconds
-unsigned long stepTime = 5000; // TODO: remove value
+unsigned long stepTime; // TODO: remove value
 // time when current movement should end, in milliseconds
 unsigned long endTime;
 // for measuring how long current movement lasted
-unsigned long eventTime;
-// temporary values
-unsigned int count;
+//unsigned long eventTime;
 
 
 boolean left = false;
@@ -33,34 +41,37 @@ boolean leftBtn = false;
 boolean rightBtn = false;
 
 
-int _leftOutputPin, _rightOutputPin, _leftEdgePin, _rightEdgePin, _leftButtonPin, _rightButtonPin;
+//int _leftOutputPin, _rightOutputPin, _leftEdgePin, _rightEdgePin, _leftButtonPin, _rightButtonPin;
 
 
-Controller::Controller(byte *temp, int leftOutputPin, int rightOutputPin, int leftEdgePin, int rightEdgePin, int leftButtonPin, int rightButtonPin)
+Controller::Controller(byte *temp/*, int leftOutputPin, int rightOutputPin, int leftEdgePin, int rightEdgePin, int leftButtonPin, int rightButtonPin*/)
 {
   _times = temp;
   
   // set pinmodes
   
-  pinMode(leftOutputPin, OUTPUT);
+  pinMode(MOVE_LEFT, OUTPUT);
   //digitalWrite(leftOutputPin, HIGH);
-  _leftOutputPin = leftOutputPin;
+  //_leftOutputPin = leftOutputPin;
   
-  pinMode(rightOutputPin, OUTPUT);
+  pinMode(MOVE_RIGHT, OUTPUT);
   //digitalWrite(rightOutputPin, HIGH);
-  _rightOutputPin = rightOutputPin;
+  //_rightOutputPin = rightOutputPin;
   
-  pinMode(leftButtonPin, INPUT);
-  _leftButtonPin = leftButtonPin;
+  pinMode(LEFT_BTN, INPUT);
+  //_leftButtonPin = leftButtonPin;
   
-  pinMode(rightButtonPin, INPUT);
-  _rightButtonPin = rightButtonPin;
+  pinMode(RIGHT_BTN, INPUT);
+  //_rightButtonPin = rightButtonPin;
   
-  pinMode(leftEdgePin, INPUT);
-  _leftEdgePin = leftEdgePin;
+  pinMode(LEFT_END, INPUT);
+  //_leftEdgePin = leftEdgePin;
   
-  pinMode(rightEdgePin, INPUT);
-  _rightEdgePin = rightEdgePin;
+  pinMode(RIGHT_END, INPUT);
+  //_rightEdgePin = rightEdgePin;
+  
+  getInterval();
+  getStepSize();
 }
 
 
@@ -70,46 +81,51 @@ boolean Controller::isMoving()
 }
 
 
+void Controller::stop()
+{
+  left = false;
+  right = false;
+}
+
+
 boolean Controller::runWithBlocking()
 {
-  leftEdge = digitalRead(_leftEdgePin);
-  rightEdge = digitalRead(_rightEdgePin);
-  leftBtn = digitalRead(_leftButtonPin);
-  rightBtn = digitalRead(_rightButtonPin);
+  leftEdge = digitalRead(LEFT_END);
+  rightEdge = digitalRead(RIGHT_END);
+  leftBtn = digitalRead(LEFT_BTN);
+  rightBtn = digitalRead(RIGHT_BTN);
   
   if (left)
   {
     if (leftEdge && millis() < endTime)
     {
-      //Serial.println("LEFT");
-      digitalWrite(_leftOutputPin, HIGH);
+      digitalWrite(MOVE_LEFT, HIGH);
     }
     else if (!leftBtn || !leftEdge) // if button isn't still pressed or has reached the end
     {
-      digitalWrite(_leftOutputPin, LOW);
+      digitalWrite(MOVE_LEFT, LOW);
       left = false;
-      eventTime = millis() - eventTime;
+      //eventTime = millis() - eventTime;
     }
   }
   else if (right)
   { 
     if (rightEdge && millis() < endTime)
     {
-      //Serial.println("RIGHT");
-      digitalWrite(_rightOutputPin, HIGH);
+      digitalWrite(MOVE_RIGHT, HIGH);
     }
     else if (!rightBtn || !rightEdge) // if button isn't still pressed or has reached the end
     {
-      digitalWrite(_rightOutputPin, LOW);
+      digitalWrite(MOVE_RIGHT, LOW);
       right = false;
-      eventTime = millis() - eventTime;
+      //eventTime = millis() - eventTime;
     }
   }
-  else if (eventTime != 0)
+  /*else if (eventTime != 0)
   {
     Log.Debug("Last action time: %d ms", eventTime);
     eventTime = 0;
-  }
+  }*/
   else
   {
     if (leftBtn)
@@ -123,13 +139,19 @@ boolean Controller::runWithBlocking()
       moveRight(25);
     }
   }
-  return isMoving() && eventTime == 0; // FIXME
+  return isMoving()/* && eventTime == 0*/;
 }
 
+void Controller::failMsg()
+{
+  Log.Debug("Moving failed! Left: %T Right: %T LeftEdge: %T RightEdge: %T", left, right, leftEdge, rightEdge);
+}
 
 boolean Controller::moveLeft(int amount)
 {
   unsigned long time = stepTime * amount / 100;
+  
+  stop();
   
   Log.Debug("Moving left for %d ms", time);
   
@@ -137,12 +159,10 @@ boolean Controller::moveLeft(int amount)
   {
     left = true;
     endTime = millis() + time;
-    eventTime = millis();
+    //eventTime = millis();
     return true;
   }
-  
-  Log.Debug("Moving failed! Left: %T Right: %T LeftEdge: %T RightEdge: %T", time, left, right, rightEdge);
-  
+  failMsg();
   return false;
 }
 
@@ -151,18 +171,18 @@ boolean Controller::moveRight(int amount)
 {
   unsigned long time = stepTime * amount / 100;
   
+  stop();
+  
   Log.Debug("Moving right for %d ms", time);
   
   if (!(left || right) && rightEdge)
   {
     right = true;
     endTime = millis() + time;
-    eventTime = millis();
+    //eventTime = millis();
     return true;
   }
-  
-  Log.Debug("Moving failed! Left: %T Right: %T LeftEdge: %T RightEdge: %T", time, left, right, rightEdge);
-  
+  failMsg();
   return false;
 }
 
@@ -171,13 +191,6 @@ boolean Controller::moveRight(int amount)
 //
 // GETTERS
 //
-void getTimes() {
-  
-  for (int i = 0, j = EE_START_H; j < EE_RUNTIME_VARS; i++, j++) {
-    _times[i] = EEPROM.read(i); // read from EEPROM
-  }
-}
-
 
 byte Controller::getProperty(int key)
 {
@@ -192,13 +205,46 @@ int Controller::getPropertyWord(int key1, int key2)
   return temp | EEPROM.read(key2);
 }
 
+byte* Controller::getTimes()
+{
+  for (int i = 0, j = EE_START_H; j < EE_RUNTIME_VARS; i++, j++)
+  {
+    _times[i] = getProperty(i); // read from EEPROM
+  }
+  return _times;
+}
+
+String Controller::getStatus()
+{
+  time_t t = now(); // save current time
+  char buffer[200];
+  sprintf(buffer, "{\"status\":%d,\"start\":\"%02d:%02d\",\"stop\":\"%02d:%02d\",\"rewind\":\"%02d:%02d\",\"date\":\"%02d.%02d.%u\",\"time\":\"%02d:%02d:%02d\",\"interval\":%u,\"step\":",
+    calculateProgress(),_times[0],_times[1],_times[2],_times[3],_times[4],_times[5],
+    day(t), month(t), year(t), hour(t), minute(t), second(t), interval); // max 16 arguments :(
+  String s = buffer;
+  s += stepTime;
+  s += "}";
+  return s;
+}
+
+long Controller::getInterval()
+{
+  interval = getPropertyWord(EE_INTERVAL_H, EE_INTERVAL_L);
+  return interval;
+}
+
+long Controller::getStepSize()
+{
+  stepTime = getPropertyWord(EE_STEP_TIME_H, EE_STEP_TIME_L);
+  return stepTime;
+}
+
 
 //
 // SETTERS
 //
 
-
-boolean setTimes(String string)
+boolean Controller::setTimes(String string)
 {
   if (string.length() < 12)
   {
@@ -213,13 +259,6 @@ boolean setTimes(String string)
     for (int j = 0; j < 2; j++)
     {
       temp[i] = 10 * temp[i] + string.charAt(2*i+j+1) - '0';
-      
-      if (j == 1)
-      {
-        Serial.print(i);
-        Serial.print(" = ");
-        Serial.println(temp[i]);
-      }
     }
   }
   
@@ -227,7 +266,7 @@ boolean setTimes(String string)
   for (int i = 0, j = EE_START_H; j < EE_RUNTIME_VARS; i++, j++)
   {
     _times[i] = temp[i]; // save to the array
-    //EEPROM.write(j, temp[i]); // save to EEPROM
+    setProperty(j, temp[i]); // save to EEPROM
   }
   
   return true;
@@ -247,17 +286,38 @@ void Controller::setPropertyWord(int key1, int key2, int value)
 }
 
 
-void setTimestamp(unsigned long t)
+void Controller::setTimestamp(unsigned long t)
 {
   if (t > 0)
   {
 #ifdef DS1307RTC_h
+    Serial.print("new timestamp:");
+    Serial.println(t);
     RTC.set(t);
 #endif
     setTime(t);
   }
 }
 
+
+void Controller::setInterval(long _interval)
+{
+  interval = _interval;
+  setPropertyWord(EE_INTERVAL_H, EE_INTERVAL_L, _interval);
+}
+
+
+void Controller::setStepSize(long _stepSize)
+{
+  stepTime = _stepSize;
+  setPropertyWord(EE_STEP_TIME_H, EE_STEP_TIME_L, _stepSize);
+}
+
+
+
+//
+// UTILITY
+//
 
 time_t stringToTime(String str)
 {
@@ -275,8 +335,6 @@ time_t stringToTime(String str)
 }
 
 
-
-
 int Controller::calculateProgress()
 {
   int progress = 0; // return variable
@@ -285,22 +343,13 @@ int Controller::calculateProgress()
   breakTime(current, elements); // break time into elements
   elements.Second = 0; // set set start time
   elements.Hour = (int)*_times;
-  Serial.print("0:");
-  Serial.println(elements.Hour);
   elements.Minute = (int)*(_times+1);
-  Serial.print("1:");
-  Serial.println(elements.Minute);
   time_t start = makeTime(elements); // convert back to timestamp
   
   if (current > start) // if the cycle has started today
   {
     elements.Hour = (unsigned int)*(_times+2); // reuse elements to create stop time timestamp
-    Serial.print("2:");
-    Serial.println(elements.Hour);
-    
     elements.Minute = (unsigned int)*(_times+3);
-    Serial.print("3:");
-    Serial.println(elements.Minute);
     
     time_t stop = makeTime(elements); // make the timestamp
     
@@ -316,12 +365,7 @@ int Controller::calculateProgress()
   {
     //breakTime(nextMidnight(current), elements); // lets make an elements object holding next day's date
     elements.Hour = (unsigned int)*(_times+4); // set the rewind time
-    Serial.print("4:");
-    Serial.println(elements.Hour);
-    
     elements.Minute = (unsigned int)*(_times+5);
-    Serial.print("5:");
-    Serial.println(elements.Minute);
     
     time_t rewind = makeTime(elements); // make the timestamp
     
@@ -334,21 +378,16 @@ int Controller::calculateProgress()
 }
 
 
-byte getProperty(byte index)
-{
-  
-}
-
-
-
 
 /*
  *  COMMAND CENTRE
  */
-boolean Controller::doCommand(String string)
+String Controller::doCommand(String string)
 {
-  Log.Debug("Command: %s", string);
+  //Log.Debug("Command: %s", string);
   
+  String s = NULL;
+  int i = (int) stringToTime(string);
   char command;
   
   if (string.length() > 0)
@@ -357,35 +396,35 @@ boolean Controller::doCommand(String string)
   }
   else
   {
-    return false;
+    return s;
   }
   
   switch (command)
   {
-    case 'C':
-      Log.Debug("Calculated progress is %d%", calculateProgress());
+    case 'A': // status request only
       break;
-    case 'R':
-      //log("DEBUG", "Read command requested!");
-      //loadFromEeprom();
+    case 'L': // move left
+      moveLeft(i);
       break;
-    case 'W':
-      //log("DEBUG", "Write command requested!");
-      //writeToEeprom();
+    case 'R': // move right
+      moveRight(i);
       break;
-    case 'P':
-      //log("DEBUG", "Permanent time set command requested!");
-      //setPermTime(stringToTime(inputString));
+    case 'I': // update interval
+      setInterval(i);
       break;
-    case 'S':
+    case 'J': // update step size
+      setStepSize(i);
+      break;
+    case 'S': // update start/end/rewind times
       setTimes(string);
       break;
-    case 'T':
+    case 'T': // update date and time
       setTimestamp(stringToTime(string));
       break;
-    default:
-      return false;
+    default: // returns NULL
+      return s;
   }
+  s = getStatus();
   
-  return true;
+  return s;
 }

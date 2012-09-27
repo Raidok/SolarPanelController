@@ -1,30 +1,11 @@
 /*
   Solar panel controller
-  by Raidok
+  Created by Raido Kalbre, May 2012.
+  Licensed under GPL v3.
  */
 
 
 #define LOGLEVEL LOG_LEVEL_DEBUG
-
-#define LEFT_BTN  2
-#define RIGHT_BTN 3
-#define LEFT_END  4
-#define RIGHT_END 5
-
-#define MOVE_LEFT 7
-#define MOVE_RIGHT 8
-#define MAX_TIME 21000
-
-#define LEFT_BTN  2
-#define RIGHT_BTN 3
-#define LEFT_END  4
-#define RIGHT_END 5
-
-#define MOVE_LEFT 7
-#define MOVE_RIGHT 8
-#define MAX_TIME 21000
-
-
 
 #include <SPI.h>
 #include <Ethernet.h>
@@ -34,9 +15,7 @@
 #include <DS1307RTC.h>
 #include <Logging.h>
 #include <EEPROM.h>
-#include <TinyWebServer.h>
 #include "Controller.h"
-//#include "Logger.h"
 
 
 // array for temporary values, initally used for MAC-address,
@@ -46,18 +25,23 @@ byte temp[6] = { 0x90, 0xA2, 0xDA, 0x00, 0xF8, 0x03 };
 char command = '\0'; // nullchar (end of string)
 // holds repeating alarms id for enabling/disabling
 AlarmID_t alarmId;
-// run interval, in seconds
-unsigned long interval = 10; // TODO: remove value
 // instance of my controller library
-Controller controller((byte*)&temp, MOVE_LEFT, MOVE_RIGHT, LEFT_END, RIGHT_END, LEFT_BTN, RIGHT_BTN);
-
-
-
-
+Controller controller((byte*)&temp/*, MOVE_LEFT, MOVE_RIGHT, LEFT_END, RIGHT_END, LEFT_BTN, RIGHT_BTN*/);
+// WebServer
+EthernetServer server(80);
+// variable for client connection
+EthernetClient client;
 
 String inputString = "";         // a string to hold incoming data
 boolean stringComplete = false;  // whether the string is complete
+boolean blocked = false;         // just in case
 
+const char headerStr[] PROGMEM = 
+  "HTTP/1.1 200 OK\n" \
+  "Content-Type: text/html\n" \
+  "Access-Control-Allow-Origin: *\n" \
+  "Access-Control-Allow-Headers: Content-Type, X-Requested-With\n" \
+  "Access-Control-Allow-Methods: GET, POST, OPTIONS\n\n)]}',\n";
 
 
 void setup() {
@@ -67,23 +51,21 @@ void setup() {
   // clock sync
   setSyncProvider(RTC.get);
   
-  Log.Debug("Startup");
-  
   // begin ethernet
-  //Serial.print("IP: ");
-  //Ethernet.begin(temp);
-  //Serial.println(Ethernet.localIP());
+  Log.Debug("Starting webserver");
+  Ethernet.begin(temp);
+  Serial.print("IP: ");
+  Serial.println(Ethernet.localIP());
+  server.begin();
   
   // serial input buffer
   inputString.reserve(20);
   
-  // TODO: from EEPROM
-  temp[0] = 6;
-  temp[1] = 30;
-  temp[2] = 18;
-  temp[3] = 30;
-  temp[4] = 2;
-  temp[5] = 2;
+  byte* t = controller.getTimes();
+  for (int i = 0; i < 6; i++)
+  {
+    temp[i] = t[i];
+  }
   
   // set alarms
   setAlarms(temp);
@@ -97,14 +79,20 @@ void loop() {
   
   if (controller.runWithBlocking()) { // movement is priority!
     
+    if (isConnected()) {
+      sendProgStr(headerStr);
+      //inputString += '\0';
+      stringComplete = true;
+    }
+    
     if (stringComplete) {
-      Serial.print(">>");
-      Serial.println(inputString);
-      if (!controller.doCommand(inputString)) {
-        Log.Debug("Command unsuccessful!");
+      String ret = controller.doCommand(inputString);
+      if (ret != NULL) {
+        client.println(ret);
       }
       inputString = "";
       stringComplete = false;
+      close();
     }
   }
 }
@@ -116,13 +104,9 @@ void loop() {
 void MovingAlarm()
 {
   alarmId = Alarm.getTriggeredAlarmId();
-  Serial.print("alarm:");
-  Serial.println(alarmId);
-  if (controller.moveRight(100)) {
-    //log("INFO", "This just moved!!");
-    Alarm.timerOnce(interval, MovingAlarm);
+  if (!blocked && controller.moveRight(100)) {
+    Alarm.timerOnce(controller.getInterval(), MovingAlarm);
   } else {
-    //log("INFO", "Cycle has reached the end.");
     NightAlarm();
   }
 }
@@ -132,8 +116,6 @@ void MorningAlarm()
 {
   Log.Debug("Good morning!");
   Alarm.timerOnce(5, MovingAlarm);
-  //MovingAlarm();
-  //Alarm.enable(alarmId);
 }
 
 
@@ -147,7 +129,7 @@ void NightAlarm()
 void RewindAlarm()
 {
   Log.Debug("Rewind.");
-  controller.moveLeft(MAX_TIME); // turn it for 30 seconds or until reaches end
+  if (!blocked) controller.moveLeft(10000); // turn to the other end
 }
 
 
@@ -159,23 +141,78 @@ void setAlarms(byte* temp)
   Alarm.alarmRepeat(temp[4], temp[5], 0, RewindAlarm); // rewind
   //time_t time = now();
   if (controller.calculateProgress() < 100) {
-    //Alarm.timerOnce(5, MovingAlarm); // in case the cycle has started at the time of restarting
+    Alarm.timerOnce(5, MovingAlarm); // in case the cycle has started at the time of restarting
   }
 }
 
 
 
-/////////////////////////////////// SERIAL
+/////////////////////////////////// ETHERNET
 
-void serialEvent() {
-  while (Serial.available()) {
-    char inChar = (char)Serial.read();
-    if (inChar == '\n') {
-      stringComplete = true;
-      return;
-      //inChar = '\0'; // nullchar (end of string)
+boolean isConnected()
+{
+  client = server.available();
+  if (client)
+  {
+    char c, pc = '\0';
+    boolean ok = false;
+    int i = 0;
+    while (client.connected())
+    {
+      if (client.available())
+      {
+        char c = client.read();
+        
+        if (i == 0) // workaround for OPTIONS request
+        {
+          if (c == 'O')
+          {
+            inputString = "";
+            return true;
+          }
+          i++;
+        }
+        
+        if (c == '/') // ignore OPTIONS request
+        {
+          ok = true;
+        }
+        else if (ok)
+        {
+          
+          if (c == ' ')
+          {
+            if (inputString.charAt(0) == 'T') // time change blocks alarms
+            {
+              Serial.println("kell!");
+              blocked = true;
+            }
+            return true;
+          }
+          else
+          {
+            inputString += c;
+          }
+          
+        }
+        pc = c;
+      }
     }
-    inputString += inChar;
   }
+  return false;
+}
+
+void sendProgStr(const prog_char str[])
+{
+  char c;
+  if(!str) return;
+  while((c = pgm_read_byte(str++)))
+    client.print(c);
+}
+
+void close()
+{
+  delay(1);
+  client.stop();
 }
 

@@ -31,9 +31,9 @@
 class Controller
 {
   public:
-    Controller(byte* times, int leftOutputPin, int rightOutputPin, int leftEdgePin, int rightEdgePin, int leftButtonPin, int rightButtonPin);
+    Controller(byte* times/*, int leftOutputPin, int rightOutputPin, int leftEdgePin, int rightEdgePin, int leftButtonPin, int rightButtonPin*/);
     boolean runWithBlocking();
-    boolean doCommand(String string);
+    String doCommand(String string);
     boolean isMoving();
     boolean moveLeft(int amount);
     boolean moveRight(int amount);
@@ -43,7 +43,17 @@ class Controller
     void setPropertyWord(int key1, int key2, int value);
     byte getProperty(int key);
     int getPropertyWord(int key1, int key2);
+    long getInterval();
+    void setInterval(long interval);
+    long getStepSize();
+    void setStepSize(long stepSize);
+    byte* getTimes();
+    boolean setTimes(String string);
+    void setTimestamp(unsigned long t);
   private:
+    String getStatus();
+    void stop();
+    void failMsg();
     Logging* _logger;
 
 };
