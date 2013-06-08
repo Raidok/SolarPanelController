@@ -1,0 +1,11 @@
+
+Projects dependencies:
+----------------------
+mrRobot62's Arduino logging library
+https://github.com/mrRobot62/Arduino-logging-library
+Time
+http://www.pjrc.com/teensy/td_libs_Time.html
+TimeAlarms
+http://www.pjrc.com/teensy/td_libs_TimeAlarms.html
+DS1307RTC
+http://www.pjrc.com/teensy/td_libs_DS1307RTC.html
