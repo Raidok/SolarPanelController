@@ -1,7 +1,0 @@
-This sketch shows how to use checkboxes to control Arduino outputs. It uses external jQuery to do the AJAX calls and Webduino library to handle the web requests.
-
-Requirements:
-Arduino IDE 1.0
-Arduino itsef
-Arduino Ethernet Shield (WIZnet W5100 chip)
-Webduino library (https://github.com/sirleech/Webduino)

@@ -1,7 +1,0 @@
-This sketch checks for the memory card if the configuration file exists. If it does it reads and parses the contents. If the file does not exist, it creates the file and fills it with default configuration.
-
-Requirements:
-Arduino IDE 1.0
-Arduino itself
-Arduino Ethernet Shield (W5100 chip)
-
